@@ -27,6 +27,43 @@ export default function UniversalFormatter() {
   const [diffResult, setDiffResult] = useState('');
   const fileInputRef = useRef(null);
 
+  // Structured Data for SEO
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Universal Format Converter",
+    "description": "Free online JSON, XML, and YAML formatter, validator, and converter with auto-detection and difference checker",
+    "url": "https://jsonformatter.com",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "All",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "featureList": [
+      "JSON formatting and validation",
+      "XML formatting and validation", 
+      "YAML formatting and validation",
+      "Auto-format detection",
+      "Data format conversion",
+      "Visual difference checker",
+      "Tree view visualization",
+      "Data minification",
+      "Real-time validation",
+      "Drag and drop file support"
+    ],
+    "author": {
+      "@type": "Organization",
+      "name": "Universal Formatter"
+    },
+    "datePublished": "2025-01-01",
+    "dateModified": new Date().toISOString().split('T')[0],
+    "inLanguage": "en-US",
+    "isAccessibleForFree": true,
+    "browserRequirements": "Requires JavaScript. Supports all modern browsers."
+  };
+
   // Auto-convert when input data changes
   useEffect(() => {
     const delayConvert = setTimeout(() => {
@@ -892,66 +929,100 @@ address:
   }, [minifyData, clearAll, toggleDarkMode, downloadData, validateData, generateTreeView, escapeData]);
 
   return (
-    <div className={`min-h-screen transition-colors duration-200 ${darkMode ? 'dark' : ''} bg-gray-50 dark:bg-gray-900`}>
-      {/* Header */}
-      <div className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                Universal Format Converter
-              </h1>
-              <p className="mt-2 text-gray-600 dark:text-gray-300">
-                Convert between JSON, XML, and YAML formats with advanced formatting and validation
-              </p>
-            </div>
-            
-            <div className="flex items-center gap-4">
-              {/* Dark mode toggle */}
-              <button
-                onClick={toggleDarkMode}
-                className="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                title={`Switch to ${darkMode ? 'light' : 'dark'} mode`}
-              >
-                <span className="text-lg">
-                  {darkMode ? '☀️' : '🌙'}
-                </span>
-              </button>
+    <>
+      {/* SEO Structured Data */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(structuredData)
+        }}
+      />
+      
+      <main className={`min-h-screen transition-colors duration-200 ${darkMode ? 'dark' : ''} bg-gray-50 dark:bg-gray-900`}>
+        {/* Header */}
+        <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+                  Universal Format Converter
+                </h1>
+                <p className="mt-2 text-gray-600 dark:text-gray-300">
+                  Convert between JSON, XML, and YAML formats with advanced formatting, validation, and difference checking
+                </p>
+              </div>
               
-              {/* File operations */}
-              <div className="flex gap-2">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileUpload}
-                  accept=".json,.xml,.yaml,.yml"
-                  className="hidden"
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
-                  title="Upload file"
-                >
-                  📁 Upload
-                </button>
-                <button
-                  onClick={downloadData}
-                  disabled={!outputData}
-                  className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Download converted data"
-                >
-                  💾 Download
-                </button>
+              <div className="flex items-center gap-4">
+                
+                {/* File operations */}
+                <div className="flex gap-2">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    accept=".json,.xml,.yaml,.yml"
+                    className="hidden"
+                    aria-label="Upload file"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                    title="Upload JSON, XML, or YAML file"
+                    aria-label="Upload file"
+                  >
+                    📁 Upload
+                  </button>
+                  <button
+                    onClick={downloadData}
+                    disabled={!outputData}
+                    className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Download converted data"
+                    aria-label="Download converted data"
+                  >
+                    💾 Download
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
+        </header>
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        {/* SEO Content Section */}
+        <section className="mb-8 prose dark:prose-invert max-w-none">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+              Professional Data Format Converter & Validator
+            </h2>
+            <div className="grid md:grid-cols-2 gap-6 text-sm text-gray-600 dark:text-gray-300">
+              <div>
+                <h3 className="font-medium text-gray-900 dark:text-white mb-2">Format Support</h3>
+                <ul className="space-y-1">
+                  <li>• <strong>JSON</strong> - JavaScript Object Notation formatting and validation</li>
+                  <li>• <strong>XML</strong> - Extensible Markup Language processing</li>
+                  <li>• <strong>YAML</strong> - YAML Ain't Markup Language conversion</li>
+                  <li>• <strong>Auto-detection</strong> - Intelligent format recognition</li>
+                </ul>
+              </div>
+              <div>
+                <h3 className="font-medium text-gray-900 dark:text-white mb-2">Features</h3>
+                <ul className="space-y-1">
+                  <li>• Real-time validation and error detection</li>
+                  <li>• Visual difference checker with Git-style highlighting</li>
+                  <li>• Tree view for hierarchical data visualization</li>
+                  <li>• Data statistics and element counting</li>
+                  <li>• Drag-and-drop file support</li>
+                  <li>• Export formatted results</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Controls */}
-        <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+        <section aria-label="Formatting controls" className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap gap-2">
               <button
@@ -1045,7 +1116,7 @@ address:
               </div>
             )}
           </div>
-        </div>
+        </section>
 
         {/* Error Display */}
         {error && (
@@ -1476,13 +1547,16 @@ address:
         </div>
 
         {/* Footer */}
-        <div className="mt-8 text-center text-gray-500 dark:text-gray-400 text-sm">
-          <p>Universal Format Converter - Auto-detects and converts between JSON, XML, and YAML</p>
-          <p className="mt-1">
-            Keyboard shortcuts: Paste (Ctrl+V), Minify (Ctrl+M), Validate (Ctrl+L), Tree View (Ctrl+T), Escape (Ctrl+E), Diff (Ctrl+R), Clear (Ctrl+K), Upload (Ctrl+U), Download (Ctrl+S), Dark Mode (Ctrl+D)
-          </p>
-        </div>
+        <footer className="mt-8 text-center text-gray-500 dark:text-gray-400 text-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <p>Universal Format Converter - Auto-detects and converts between JSON, XML, and YAML</p>
+            <p className="mt-1">
+              Keyboard shortcuts: Paste (Ctrl+V), Minify (Ctrl+M), Validate (Ctrl+L), Tree View (Ctrl+T), Escape (Ctrl+E), Diff (Ctrl+R), Clear (Ctrl+K), Upload (Ctrl+U), Download (Ctrl+S)
+            </p>
+          </div>
+        </footer>
       </div>
-    </div>
+    </main>
+    </>
   );
 }
