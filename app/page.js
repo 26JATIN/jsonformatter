@@ -1002,7 +1002,7 @@ address:
                 <ul className="space-y-1">
                   <li>• <strong>JSON</strong> - JavaScript Object Notation formatting and validation</li>
                   <li>• <strong>XML</strong> - Extensible Markup Language processing</li>
-                  <li>• <strong>YAML</strong> - YAML Ain't Markup Language conversion</li>
+                  <li>• <strong>YAML</strong> - YAML Ain&apos;t Markup Language conversion</li>
                   <li>• <strong>Auto-detection</strong> - Intelligent format recognition</li>
                 </ul>
               </div>
