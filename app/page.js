@@ -9,6 +9,7 @@ export default function JsonFormatter() {
   const [indentSize, setIndentSize] = useState(2);
   const [viewMode, setViewMode] = useState('formatted'); // 'formatted', 'tree', 'minified'
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState({ matches: 0, currentMatch: 0 });
   const [jsonStats, setJsonStats] = useState(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
@@ -24,22 +25,23 @@ export default function JsonFormatter() {
     setDarkMode(savedDarkMode);
     if (savedDarkMode) {
       document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
     }
   }, []);
 
-  // Toggle dark mode
+  // Toggle dark mode - Fixed version
   const toggleDarkMode = useCallback(() => {
-    setDarkMode(prev => {
-      const newMode = !prev;
-      localStorage.setItem('json-formatter-dark-mode', newMode.toString());
-      if (newMode) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-      return newMode;
-    });
-  }, []);
+    const newMode = !darkMode;
+    setDarkMode(newMode);
+    localStorage.setItem('json-formatter-dark-mode', newMode.toString());
+    
+    if (newMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
 
   // Add to history
   const addToHistory = useCallback((json) => {
@@ -334,6 +336,7 @@ export default function JsonFormatter() {
     setError('');
     setJsonStats(null);
     setSearchTerm('');
+    setSearchResults({ matches: 0, currentMatch: 0 });
     setViewMode('formatted');
   }, []);
 
@@ -397,26 +400,36 @@ export default function JsonFormatter() {
     URL.revokeObjectURL(url);
   }, [outputJson]);
 
-  // Search in JSON
-  const searchInJson = useCallback((searchTerm) => {
+  // Enhanced search functionality
+  const performSearch = useCallback((term) => {
+    if (!term || !outputJson) {
+      setSearchResults({ matches: 0, currentMatch: 0 });
+      return;
+    }
+
+    const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const matches = [...outputJson.matchAll(regex)];
+    setSearchResults({ matches: matches.length, currentMatch: matches.length > 0 ? 1 : 0 });
+  }, [outputJson]);
+
+  // Update search when term changes
+  useEffect(() => {
+    performSearch(searchTerm);
+  }, [searchTerm, performSearch]);
+
+  // Get display text with basic highlighting info
+  const getDisplayText = useCallback(() => {
     if (!searchTerm || !outputJson) return outputJson;
     
-    try {
-      const lines = outputJson.split('\n');
-      const highlightedLines = lines.map(line => {
-        if (line.toLowerCase().includes(searchTerm.toLowerCase())) {
-          return line.replace(
-            new RegExp(searchTerm, 'gi'),
-            `<mark class="bg-yellow-300 dark:bg-yellow-600">$&</mark>`
-          );
-        }
-        return line;
-      });
-      return highlightedLines.join('\n');
-    } catch {
-      return outputJson;
-    }
-  }, [outputJson]);
+    // Split into lines and mark which lines contain matches
+    const lines = outputJson.split('\n');
+    const searchRegex = new RegExp(searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    
+    return lines.map((line, index) => {
+      const hasMatch = searchRegex.test(line);
+      return hasMatch ? `→ ${line}` : `  ${line}`;
+    }).join('\n');
+  }, [outputJson, searchTerm]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -540,10 +553,12 @@ export default function JsonFormatter() {
               {/* Dark mode toggle */}
               <button
                 onClick={toggleDarkMode}
-                className="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                title="Toggle dark mode (Ctrl+D)"
+                className="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors border border-gray-300 dark:border-gray-600"
+                title={`Switch to ${darkMode ? 'light' : 'dark'} mode (Ctrl+D)`}
               >
-                {darkMode ? '☀️' : '🌙'}
+                <span className="text-lg">
+                  {darkMode ? '☀️' : '🌙'}
+                </span>
               </button>
               
               {/* History controls */}
@@ -688,15 +703,36 @@ export default function JsonFormatter() {
             {outputJson && (
               <div className="flex items-center gap-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Search:
+                  🔍 Search:
                 </label>
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search in output..."
-                  className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm w-48"
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search in output..."
+                    className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm w-48"
+                  />
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm('')}
+                      className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      title="Clear search"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  {searchResults.matches > 0 && (
+                    <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+                      {searchResults.matches} match{searchResults.matches !== 1 ? 'es' : ''}
+                    </span>
+                  )}
+                  {searchTerm && searchResults.matches === 0 && (
+                    <span className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded">
+                      No matches
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -804,7 +840,7 @@ export default function JsonFormatter() {
             </div>
             <div className="relative">
               <textarea
-                value={searchTerm ? searchInJson(searchTerm) : outputJson}
+                value={searchTerm ? getDisplayText() : outputJson}
                 readOnly
                 placeholder="Formatted JSON will appear here...
 
