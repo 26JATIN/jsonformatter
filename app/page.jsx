@@ -21,6 +21,10 @@ export default function UniversalFormatter() {
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [showDiffChecker, setShowDiffChecker] = useState(false);
+  const [diffData1, setDiffData1] = useState('');
+  const [diffData2, setDiffData2] = useState('');
+  const [diffResult, setDiffResult] = useState('');
   const fileInputRef = useRef(null);
 
   // Auto-convert when input data changes
@@ -708,6 +712,123 @@ address:
     setDetectedInputFormat('json');
   }, [inputData]);
 
+  // Difference checker functions
+  const compareDifferences = useCallback(() => {
+    try {
+      if (!diffData1.trim() || !diffData2.trim()) {
+        setDiffResult('Please enter data in both fields to compare');
+        return;
+      }
+
+      // Auto-detect formats for both inputs
+      const format1 = detectFormat(diffData1);
+      const format2 = detectFormat(diffData2);
+      
+      let parsed1, parsed2;
+      
+      // Parse first input
+      if (format1 === 'xml') {
+        xmlParser(diffData1, { explicitArray: false, ignoreAttrs: false, mergeAttrs: true }, (err, result) => {
+          if (err) throw new Error('Invalid XML in first input');
+          parsed1 = result;
+          parseSecond();
+        });
+        return;
+      } else {
+        parsed1 = parseInput(diffData1, format1);
+      }
+      
+      parseSecond();
+      
+      function parseSecond() {
+        // Parse second input
+        if (format2 === 'xml') {
+          xmlParser(diffData2, { explicitArray: false, ignoreAttrs: false, mergeAttrs: true }, (err, result) => {
+            if (err) throw new Error('Invalid XML in second input');
+            parsed2 = result;
+            generateVisualDiff();
+          });
+          return;
+        } else {
+          parsed2 = parseInput(diffData2, format2);
+          generateVisualDiff();
+        }
+      }
+      
+      function generateVisualDiff() {
+        // Convert both to JSON for comparison
+        const json1 = JSON.stringify(parsed1, null, 2);
+        const json2 = JSON.stringify(parsed2, null, 2);
+        
+        const lines1 = json1.split('\n');
+        const lines2 = json2.split('\n');
+        
+        const diffHtml = createVisualDiff(lines1, lines2);
+        setDiffResult(diffHtml);
+      }
+      
+    } catch (err) {
+      setDiffResult(`❌ Error comparing data: ${err.message}`);
+    }
+  }, [diffData1, diffData2, detectFormat, parseInput]);
+
+  const createVisualDiff = useCallback((lines1, lines2) => {
+    const maxLines = Math.max(lines1.length, lines2.length);
+    const diffLines = [];
+    
+    // Simple line-by-line comparison
+    for (let i = 0; i < maxLines; i++) {
+      const line1 = lines1[i] || '';
+      const line2 = lines2[i] || '';
+      
+      if (line1 === line2) {
+        // Lines are identical
+        diffLines.push({
+          type: 'equal',
+          left: line1,
+          right: line2,
+          leftLineNum: i + 1,
+          rightLineNum: i + 1
+        });
+      } else if (!line1) {
+        // Line only exists in right (addition)
+        diffLines.push({
+          type: 'addition',
+          left: '',
+          right: line2,
+          leftLineNum: '',
+          rightLineNum: i + 1
+        });
+      } else if (!line2) {
+        // Line only exists in left (deletion)
+        diffLines.push({
+          type: 'deletion',
+          left: line1,
+          right: '',
+          leftLineNum: i + 1,
+          rightLineNum: ''
+        });
+      } else {
+        // Lines are different (modification)
+        diffLines.push({
+          type: 'modification',
+          left: line1,
+          right: line2,
+          leftLineNum: i + 1,
+          rightLineNum: i + 1
+        });
+      }
+    }
+    
+    return diffLines;
+  }, []);
+
+  const clearDiffChecker = useCallback(() => {
+    setDiffData1('');
+    setDiffData2('');
+    setDiffResult('');
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -755,6 +876,10 @@ address:
           case 'e':
             e.preventDefault();
             escapeData();
+            break;
+          case 'r':
+            e.preventDefault();
+            setShowDiffChecker(!showDiffChecker);
             break;
           default:
             break;
@@ -877,6 +1002,17 @@ address:
                 📝 Sample
               </button>
               <button
+                onClick={() => setShowDiffChecker(!showDiffChecker)}
+                className={`px-4 py-2 text-white rounded-lg transition-colors font-medium shadow-sm ${
+                  showDiffChecker 
+                    ? 'bg-pink-700 hover:bg-pink-800' 
+                    : 'bg-pink-600 hover:bg-pink-700'
+                }`}
+                title="Compare two data structures"
+              >
+                ⚖️ Diff
+              </button>
+              <button
                 onClick={clearAll}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium shadow-sm"
                 title="Clear all fields"
@@ -996,6 +1132,166 @@ address:
                     </div>
                   )}
                 </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Difference Checker */}
+        {showDiffChecker && (
+          <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+            <div className="border-b border-gray-200 dark:border-gray-700 p-4 flex justify-between items-center">
+              <h2 className="text-lg font-medium text-gray-900 dark:text-white">
+                ⚖️ Difference Checker
+              </h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={compareDifferences}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                  title="Compare the two inputs"
+                >
+                  Compare
+                </button>
+                <button
+                  onClick={clearDiffChecker}
+                  className="px-3 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                  title="Clear both inputs and result"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={() => setShowDiffChecker(false)}
+                  className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+                  title="Close difference checker"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+                {/* First Input */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    First Data Structure
+                  </label>
+                  <textarea
+                    value={diffData1}
+                    onChange={(e) => setDiffData1(e.target.value)}
+                    placeholder="Enter first JSON/XML/YAML data here..."
+                    className="w-full h-64 p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                    spellCheck="false"
+                  />
+                </div>
+                
+                {/* Second Input */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Second Data Structure
+                  </label>
+                  <textarea
+                    value={diffData2}
+                    onChange={(e) => setDiffData2(e.target.value)}
+                    placeholder="Enter second JSON/XML/YAML data here..."
+                    className="w-full h-64 p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                    spellCheck="false"
+                  />
+                </div>
+              </div>
+              
+              {/* Difference Result */}
+              {diffResult && (
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Visual Diff (Git-style)
+                  </label>
+                  {typeof diffResult === 'string' ? (
+                    <div className={`p-4 rounded-lg border ${
+                      diffResult.includes('✅') 
+                        ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' 
+                        : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                    }`}>
+                      <pre className="whitespace-pre-wrap text-sm font-mono text-gray-800 dark:text-gray-200">
+                        {diffResult}
+                      </pre>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-0 border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden bg-white dark:bg-gray-900">
+                      {/* Left side - Original */}
+                      <div className="border-r border-gray-300 dark:border-gray-600">
+                        <div className="bg-gray-100 dark:bg-gray-800 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 border-b border-gray-300 dark:border-gray-600">
+                          Original (Left)
+                        </div>
+                        <div className="font-mono text-sm">
+                          {diffResult.map((line, index) => (
+                            <div
+                              key={`left-${index}`}
+                              className={`flex ${
+                                line.type === 'deletion' 
+                                  ? 'bg-red-100 dark:bg-red-900/30' 
+                                  : line.type === 'modification'
+                                    ? 'bg-red-100 dark:bg-red-900/30'
+                                    : line.type === 'addition'
+                                      ? 'bg-gray-50 dark:bg-gray-800/50'
+                                      : 'bg-white dark:bg-gray-900'
+                              }`}
+                            >
+                              <span className="w-12 px-2 py-1 text-right text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 select-none">
+                                {line.leftLineNum}
+                              </span>
+                              <span className={`flex-1 px-3 py-1 ${
+                                line.type === 'deletion' ? 'text-red-800 dark:text-red-200' :
+                                line.type === 'modification' ? 'text-red-800 dark:text-red-200' :
+                                'text-gray-800 dark:text-gray-200'
+                              }`}>
+                                {line.type === 'deletion' && <span className="text-red-600">- </span>}
+                                {line.type === 'modification' && <span className="text-red-600">- </span>}
+                                {line.left || '\u00A0'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      {/* Right side - Modified */}
+                      <div>
+                        <div className="bg-gray-100 dark:bg-gray-800 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 border-b border-gray-300 dark:border-gray-600">
+                          Modified (Right)
+                        </div>
+                        <div className="font-mono text-sm">
+                          {diffResult.map((line, index) => (
+                            <div
+                              key={`right-${index}`}
+                              className={`flex ${
+                                line.type === 'addition' 
+                                  ? 'bg-green-100 dark:bg-green-900/30' 
+                                  : line.type === 'modification'
+                                    ? 'bg-green-100 dark:bg-green-900/30'
+                                    : line.type === 'deletion'
+                                      ? 'bg-gray-50 dark:bg-gray-800/50'
+                                      : 'bg-white dark:bg-gray-900'
+                              }`}
+                            >
+                              <span className="w-12 px-2 py-1 text-right text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 select-none">
+                                {line.rightLineNum}
+                              </span>
+                              <span className={`flex-1 px-3 py-1 ${
+                                line.type === 'addition' ? 'text-green-800 dark:text-green-200' :
+                                line.type === 'modification' ? 'text-green-800 dark:text-green-200' :
+                                'text-gray-800 dark:text-gray-200'
+                              }`}>
+                                {line.type === 'addition' && <span className="text-green-600">+ </span>}
+                                {line.type === 'modification' && <span className="text-green-600">+ </span>}
+                                {line.right || '\u00A0'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -1183,7 +1479,7 @@ address:
         <div className="mt-8 text-center text-gray-500 dark:text-gray-400 text-sm">
           <p>Universal Format Converter - Auto-detects and converts between JSON, XML, and YAML</p>
           <p className="mt-1">
-            Keyboard shortcuts: Paste (Ctrl+V), Minify (Ctrl+M), Validate (Ctrl+L), Tree View (Ctrl+T), Escape (Ctrl+E), Clear (Ctrl+K), Upload (Ctrl+U), Download (Ctrl+S), Dark Mode (Ctrl+D)
+            Keyboard shortcuts: Paste (Ctrl+V), Minify (Ctrl+M), Validate (Ctrl+L), Tree View (Ctrl+T), Escape (Ctrl+E), Diff (Ctrl+R), Clear (Ctrl+K), Upload (Ctrl+U), Download (Ctrl+S), Dark Mode (Ctrl+D)
           </p>
         </div>
       </div>
