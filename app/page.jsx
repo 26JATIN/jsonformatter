@@ -9,7 +9,7 @@ export default function UniversalFormatter() {
   const [outputData, setOutputData] = useState('');
   const [error, setError] = useState('');
   const [indentSize, setIndentSize] = useState(2);
-  const [inputFormat, setInputFormat] = useState('json');
+  const [inputFormat, setInputFormat] = useState('auto');
   const [outputFormat, setOutputFormat] = useState('json');
   const [viewMode, setViewMode] = useState('formatted');
   const [searchTerm, setSearchTerm] = useState('');
@@ -19,6 +19,21 @@ export default function UniversalFormatter() {
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const fileInputRef = useRef(null);
+
+  // Auto-convert when input data changes
+  useEffect(() => {
+    const delayConvert = setTimeout(() => {
+      if (inputData.trim()) {
+        convertData();
+      } else {
+        setOutputData('');
+        setError('');
+        setFormatStats(null);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(delayConvert);
+  }, [inputData, outputFormat, indentSize]);
 
   // Initialize dark mode from localStorage
   useEffect(() => {
@@ -598,21 +613,17 @@ address:
   };
 
   const loadSample = useCallback(() => {
-    setInputData(sampleData[inputFormat] || sampleData.json);
+    setInputData(sampleData.json); // Always load JSON sample since input is auto-detected
     setError('');
     setOutputData('');
     setFormatStats(null);
-  }, [inputFormat]);
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey)) {
         switch (e.key) {
-          case 'Enter':
-            e.preventDefault();
-            convertData();
-            break;
           case 'm':
             e.preventDefault();
             minifyData();
@@ -653,7 +664,7 @@ address:
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [convertData, minifyData, clearAll, toggleDarkMode, downloadData, validateData, generateTreeView, escapeData]);
+  }, [minifyData, clearAll, toggleDarkMode, downloadData, validateData, generateTreeView, escapeData]);
 
   return (
     <div className={`min-h-screen transition-colors duration-200 ${darkMode ? 'dark' : ''} bg-gray-50 dark:bg-gray-900`}>
@@ -716,28 +727,11 @@ address:
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Format Selection */}
         <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Input Format */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Input Format
-              </label>
-              <select
-                value={inputFormat}
-                onChange={(e) => setInputFormat(e.target.value)}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="auto">Auto Detect</option>
-                <option value="json">JSON</option>
-                <option value="xml">XML</option>
-                <option value="yaml">YAML</option>
-              </select>
-            </div>
-
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Output Format */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Output Format
+                Output Format (Auto-detected input)
               </label>
               <select
                 value={outputFormat}
@@ -771,13 +765,6 @@ address:
         {/* Controls */}
         <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={convertData}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm"
-              title="Convert data to selected output format"
-            >
-              🔄 Convert
-            </button>
             <button
               onClick={minifyData}
               className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium shadow-sm"
@@ -903,14 +890,14 @@ address:
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div className="border-b border-gray-200 dark:border-gray-700 p-4">
               <h2 className="text-lg font-medium text-gray-900 dark:text-white">
-                Input ({inputFormat.toUpperCase()})
+                Input (Auto-detected)
               </h2>
             </div>
             <div className="p-4">
               <textarea
                 value={inputData}
                 onChange={(e) => setInputData(e.target.value)}
-                placeholder={`Enter your ${inputFormat.toUpperCase()} data here...`}
+                placeholder="Enter your data here... Format will be auto-detected (JSON, XML, or YAML)"
                 className="w-full h-96 p-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                 spellCheck="false"
               />
@@ -920,9 +907,49 @@ address:
           {/* Output */}
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div className="border-b border-gray-200 dark:border-gray-700 p-4 flex justify-between items-center">
-              <h2 className="text-lg font-medium text-gray-900 dark:text-white">
-                Output ({outputFormat.toUpperCase()})
-              </h2>
+              <div className="flex items-center gap-4">
+                <h2 className="text-lg font-medium text-gray-900 dark:text-white">
+                  Output ({outputFormat.toUpperCase()})
+                </h2>
+                
+                {/* Format conversion buttons */}
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => setOutputFormat('json')}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      outputFormat === 'json'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                    }`}
+                    title="Convert to JSON"
+                  >
+                    JSON
+                  </button>
+                  <button
+                    onClick={() => setOutputFormat('xml')}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      outputFormat === 'xml'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                    }`}
+                    title="Convert to XML"
+                  >
+                    XML
+                  </button>
+                  <button
+                    onClick={() => setOutputFormat('yaml')}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      outputFormat === 'yaml'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                    }`}
+                    title="Convert to YAML"
+                  >
+                    YAML
+                  </button>
+                </div>
+              </div>
+              
               {outputData && (
                 <button
                   onClick={copyToClipboard}
@@ -940,7 +967,7 @@ address:
               <textarea
                 value={searchTerm ? highlightSearchResults() : outputData}
                 readOnly
-                placeholder="Converted data will appear here..."
+                placeholder="Converted data will appear here automatically..."
                 className="w-full h-96 p-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                 spellCheck="false"
               />
@@ -950,9 +977,9 @@ address:
 
         {/* Footer */}
         <div className="mt-8 text-center text-gray-500 dark:text-gray-400 text-sm">
-          <p>Universal Format Converter - Convert between JSON, XML, and YAML</p>
+          <p>Universal Format Converter - Auto-detects and converts between JSON, XML, and YAML</p>
           <p className="mt-1">
-            Keyboard shortcuts: Convert (Ctrl+Enter), Minify (Ctrl+M), Validate (Ctrl+V), Tree View (Ctrl+T), Escape (Ctrl+E), Clear (Ctrl+K), Upload (Ctrl+U), Download (Ctrl+S), Dark Mode (Ctrl+D)
+            Keyboard shortcuts: Minify (Ctrl+M), Validate (Ctrl+V), Tree View (Ctrl+T), Escape (Ctrl+E), Clear (Ctrl+K), Upload (Ctrl+U), Download (Ctrl+S), Dark Mode (Ctrl+D)
           </p>
         </div>
       </div>
