@@ -7,17 +7,20 @@ import { parseString as xmlParser, Builder as XmlBuilder } from 'xml2js';
 export default function UniversalFormatter() {
   const [inputData, setInputData] = useState('');
   const [outputData, setOutputData] = useState('');
+  const [originalOutputData, setOriginalOutputData] = useState(''); // Store original formatted data
   const [error, setError] = useState('');
   const [indentSize, setIndentSize] = useState(2);
   const [inputFormat, setInputFormat] = useState('auto');
   const [outputFormat, setOutputFormat] = useState('json');
   const [viewMode, setViewMode] = useState('formatted');
+  const [detectedInputFormat, setDetectedInputFormat] = useState('json'); // Track detected format
   const [searchTerm, setSearchTerm] = useState('');
   const [formatStats, setFormatStats] = useState(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef(null);
 
   // Auto-convert when input data changes
@@ -27,8 +30,10 @@ export default function UniversalFormatter() {
         convertData();
       } else {
         setOutputData('');
+        setOriginalOutputData('');
         setError('');
         setFormatStats(null);
+        setDetectedInputFormat('json');
       }
     }, 500); // 500ms debounce
 
@@ -73,18 +78,42 @@ export default function UniversalFormatter() {
     const trimmed = input.trim();
     if (!trimmed) return 'json';
     
-    // Try JSON first
+    // Check for XML first (most distinctive)
+    if ((trimmed.startsWith('<') && trimmed.endsWith('>') && trimmed.includes('</')) ||
+        trimmed.startsWith('<?xml')) {
+      return 'xml';
+    }
+    
+    // Check for YAML indicators
+    const hasYamlIndicators = (
+      trimmed.includes('\n') && (
+        /^\s*[\w-]+:\s*/.test(trimmed) || // key: value pattern at start of line
+        /^\s*-\s+/.test(trimmed) ||       // list item pattern
+        trimmed.includes('---') ||        // document separator
+        /:\s*\n/.test(trimmed) ||         // key: followed by newline
+        /^\s*[\w-]+:\s*\|/.test(trimmed) || // literal block scalar
+        /^\s*[\w-]+:\s*>/.test(trimmed)     // folded block scalar
+      )
+    );
+    
+    // Try parsing as YAML first if it has YAML indicators
+    if (hasYamlIndicators) {
+      try {
+        const yamlResult = yaml.load(trimmed);
+        // Verify it's not just a simple string/number that could be JSON
+        if (yamlResult !== null && typeof yamlResult === 'object') {
+          return 'yaml';
+        }
+      } catch {}
+    }
+    
+    // Try JSON
     try {
       JSON.parse(trimmed);
       return 'json';
     } catch {}
     
-    // Try XML
-    if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
-      return 'xml';
-    }
-    
-    // Try YAML
+    // Try YAML as fallback (for simple YAML that doesn't have clear indicators)
     try {
       yaml.load(trimmed);
       return 'yaml';
@@ -149,10 +178,14 @@ export default function UniversalFormatter() {
       } else if (format === 'xml') {
         const elementCount = (dataString.match(/<[^\/][^>]*>/g) || []).length;
         const attributeCount = (dataString.match(/\w+="/g) || []).length;
+        const textNodes = (dataString.match(/>([^<]+)</g) || []).length;
+        const lines = dataString.split('\n').length;
         return {
           size: dataString.length,
           elements: elementCount,
           attributes: attributeCount,
+          textNodes: textNodes,
+          lines: lines,
           format: format.toUpperCase()
         };
       }
@@ -162,28 +195,50 @@ export default function UniversalFormatter() {
         return Math.max(...Object.values(obj).map(value => calculateDepth(value, depth + 1)));
       };
 
-      const countItems = (obj) => {
-        let count = 0;
+      const countElements = (obj) => {
+        let counts = {
+          objects: 0,
+          arrays: 0,
+          strings: 0,
+          numbers: 0,
+          booleans: 0,
+          nulls: 0,
+          totalKeys: 0
+        };
+
         const traverse = (item) => {
-          if (typeof item === 'object' && item !== null) {
-            count++;
-            if (Array.isArray(item)) {
-              item.forEach(traverse);
-            } else {
-              Object.values(item).forEach(traverse);
-            }
-          } else {
-            count++;
+          if (item === null) {
+            counts.nulls++;
+          } else if (Array.isArray(item)) {
+            counts.arrays++;
+            item.forEach(traverse);
+          } else if (typeof item === 'object') {
+            counts.objects++;
+            counts.totalKeys += Object.keys(item).length;
+            Object.values(item).forEach(traverse);
+          } else if (typeof item === 'string') {
+            counts.strings++;
+          } else if (typeof item === 'number') {
+            counts.numbers++;
+          } else if (typeof item === 'boolean') {
+            counts.booleans++;
           }
         };
+
         traverse(obj);
-        return count;
+        return counts;
       };
+
+      const elementCounts = countElements(parsed);
+      const totalItems = Object.values(elementCounts).reduce((sum, count) => sum + count, 0) - elementCounts.totalKeys;
+      const lines = dataString.split('\n').length;
 
       return {
         size: dataString.length,
         depth: calculateDepth(parsed),
-        items: countItems(parsed),
+        items: totalItems,
+        lines: lines,
+        ...elementCounts,
         format: format.toUpperCase()
       };
     } catch {
@@ -197,11 +252,14 @@ export default function UniversalFormatter() {
       if (!inputData.trim()) {
         setError('Please enter data to convert');
         setOutputData('');
+        setOriginalOutputData('');
         setFormatStats(null);
+        setDetectedInputFormat('json');
         return;
       }
 
       const detectedFormat = inputFormat === 'auto' ? detectFormat(inputData) : inputFormat;
+      setDetectedInputFormat(detectedFormat);
       
       let parsed;
       
@@ -214,6 +272,8 @@ export default function UniversalFormatter() {
       const formatted = formatOutput(parsed, outputFormat);
       
       setOutputData(formatted);
+      setOriginalOutputData(formatted); // Store original formatted data
+      setViewMode('formatted');
       setError('');
       setFormatStats(calculateStats(inputData, detectedFormat));
       addToHistory(inputData);
@@ -221,7 +281,9 @@ export default function UniversalFormatter() {
     } catch (err) {
       setError(`Invalid ${inputFormat.toUpperCase()}: ${err.message}`);
       setOutputData('');
+      setOriginalOutputData('');
       setFormatStats(null);
+      setDetectedInputFormat('json');
     }
   }, [inputData, inputFormat, outputFormat, detectFormat, parseInput, formatOutput, calculateStats, addToHistory]);
 
@@ -231,11 +293,13 @@ export default function UniversalFormatter() {
       if (!inputData.trim()) {
         setError('Please enter data to minify');
         setOutputData('');
+        setOriginalOutputData('');
         setFormatStats(null);
         return;
       }
 
       const detectedFormat = inputFormat === 'auto' ? detectFormat(inputData) : inputFormat;
+      setDetectedInputFormat(detectedFormat);
       let parsed;
       
       if (detectedFormat === 'xml') {
@@ -255,12 +319,15 @@ export default function UniversalFormatter() {
       }
       
       setOutputData(minified);
+      setOriginalOutputData(minified);
+      setViewMode('formatted');
       setError('');
       setFormatStats(calculateStats(inputData, detectedFormat));
       addToHistory(inputData);
     } catch (err) {
       setError(`Invalid ${inputFormat.toUpperCase()}: ${err.message}`);
       setOutputData('');
+      setOriginalOutputData('');
       setFormatStats(null);
     }
   }, [inputData, inputFormat, outputFormat, detectFormat, parseInput, calculateStats, addToHistory]);
@@ -275,6 +342,7 @@ export default function UniversalFormatter() {
       }
 
       const detectedFormat = inputFormat === 'auto' ? detectFormat(inputData) : inputFormat;
+      setDetectedInputFormat(detectedFormat);
       let parsed;
       
       if (detectedFormat === 'xml') {
@@ -301,24 +369,28 @@ export default function UniversalFormatter() {
   const clearAll = useCallback(() => {
     setInputData('');
     setOutputData('');
+    setOriginalOutputData('');
     setError('');
     setFormatStats(null);
     setSearchTerm('');
     setViewMode('formatted');
+    setDetectedInputFormat('json');
   }, []);
 
   // Copy to clipboard
   const copyToClipboard = useCallback(async () => {
-    if (outputData) {
+    // Copy original formatted data when in tree view, otherwise copy displayed data
+    const dataToCopy = viewMode === 'tree' ? originalOutputData : outputData;
+    if (dataToCopy) {
       try {
-        await navigator.clipboard.writeText(outputData);
+        await navigator.clipboard.writeText(dataToCopy);
         setCopySuccess(true);
         setTimeout(() => setCopySuccess(false), 2000);
       } catch (err) {
         console.error('Failed to copy:', err);
       }
     }
-  }, [outputData]);
+  }, [outputData, originalOutputData, viewMode]);
 
   // Generate tree view
   const generateTreeView = useCallback(async () => {
@@ -326,11 +398,13 @@ export default function UniversalFormatter() {
       if (!inputData.trim()) {
         setError('Please enter data to view as tree');
         setOutputData('');
+        setOriginalOutputData('');
         setFormatStats(null);
         return;
       }
 
       const detectedFormat = inputFormat === 'auto' ? detectFormat(inputData) : inputFormat;
+      setDetectedInputFormat(detectedFormat);
       let parsed;
       
       if (detectedFormat === 'xml') {
@@ -339,8 +413,12 @@ export default function UniversalFormatter() {
         parsed = parseInput(inputData, detectedFormat);
       }
 
+      // Generate both tree view and original formatted data
+      const formatted = formatOutput(parsed, outputFormat);
       const treeView = generateDataTree(parsed);
-      setOutputData(treeView);
+      
+      setOriginalOutputData(formatted); // Keep original formatted data
+      setOutputData(treeView); // Show tree view
       setViewMode('tree');
       setError('');
       setFormatStats(calculateStats(inputData, detectedFormat));
@@ -348,9 +426,10 @@ export default function UniversalFormatter() {
     } catch (err) {
       setError(`Invalid ${inputFormat.toUpperCase()}: ${err.message}`);
       setOutputData('');
+      setOriginalOutputData('');
       setFormatStats(null);
     }
-  }, [inputData, inputFormat, detectFormat, parseInput, calculateStats, addToHistory]);
+  }, [inputData, inputFormat, outputFormat, detectFormat, parseInput, formatOutput, calculateStats, addToHistory]);
 
   // Helper function to generate tree view
   const generateDataTree = (obj, prefix = '', isLast = true) => {
@@ -536,7 +615,10 @@ export default function UniversalFormatter() {
 
   // File download functionality
   const downloadData = useCallback(() => {
-    if (!outputData) {
+    // Use original formatted data for download, not tree view
+    const dataToDownload = viewMode === 'tree' ? originalOutputData : outputData;
+    
+    if (!dataToDownload) {
       setError('No formatted data to download');
       return;
     }
@@ -559,7 +641,7 @@ export default function UniversalFormatter() {
       }
     };
 
-    const blob = new Blob([outputData], { type: getMimeType(outputFormat) });
+    const blob = new Blob([dataToDownload], { type: getMimeType(outputFormat) });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -568,7 +650,7 @@ export default function UniversalFormatter() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [outputData, outputFormat]);
+  }, [outputData, originalOutputData, outputFormat, viewMode]);
 
   // Sample data for different formats
   const sampleData = {
@@ -613,17 +695,35 @@ address:
   };
 
   const loadSample = useCallback(() => {
-    setInputData(sampleData.json); // Always load JSON sample since input is auto-detected
+    // Cycle through different sample formats to demonstrate auto-detection
+    const samples = [sampleData.json, sampleData.xml, sampleData.yaml];
+    const currentIndex = samples.findIndex(sample => sample === inputData);
+    const nextIndex = (currentIndex + 1) % samples.length;
+    
+    setInputData(samples[nextIndex]);
     setError('');
     setOutputData('');
+    setOriginalOutputData('');
     setFormatStats(null);
-  }, []);
+    setDetectedInputFormat('json');
+  }, [inputData]);
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey)) {
         switch (e.key) {
+          case 'v':
+            // Allow normal paste to work, just ensure focus is on textarea
+            if (e.target.tagName !== 'TEXTAREA') {
+              e.preventDefault();
+              navigator.clipboard.readText().then(text => {
+                setInputData(text);
+              }).catch(err => {
+                console.error('Failed to read clipboard:', err);
+              });
+            }
+            break;
           case 'm':
             e.preventDefault();
             minifyData();
@@ -644,7 +744,7 @@ address:
             e.preventDefault();
             fileInputRef.current?.click();
             break;
-          case 'v':
+          case 'l':
             e.preventDefault();
             validateData();
             break;
@@ -727,56 +827,87 @@ address:
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Controls */}
         <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={minifyData}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium shadow-sm"
-              title="Minify the output"
-            >
-              📦 Minify
-            </button>
-            <button
-              onClick={validateData}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium shadow-sm"
-              title="Validate input data"
-            >
-              ✅ Validate
-            </button>
-            <button
-              onClick={generateTreeView}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm"
-              title="Generate tree view"
-            >
-              🌳 Tree View
-            </button>
-            <button
-              onClick={escapeData}
-              className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors font-medium shadow-sm"
-              title="Escape data (JSON strings, XML entities, YAML quotes)"
-            >
-              🔒 Escape
-            </button>
-            <button
-              onClick={unescapeData}
-              className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors font-medium shadow-sm"
-              title="Unescape data (JSON strings, XML entities, YAML quotes)"
-            >
-              🔓 Unescape
-            </button>
-            <button
-              onClick={loadSample}
-              className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors font-medium shadow-sm"
-              title="Load sample data"
-            >
-              📝 Sample
-            </button>
-            <button
-              onClick={clearAll}
-              className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium shadow-sm"
-              title="Clear all fields"
-            >
-              🧹 Clear
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={minifyData}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium shadow-sm"
+                title="Minify the output"
+              >
+                📦 Minify
+              </button>
+              <button
+                onClick={validateData}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium shadow-sm"
+                title="Validate input data"
+              >
+                ✅ Validate
+              </button>
+              <button
+                onClick={generateTreeView}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium shadow-sm"
+                title="Generate tree view"
+              >
+                🌳 Tree View
+              </button>
+              {/* Show escape/unescape buttons only for JSON format */}
+              {detectedInputFormat === 'json' && (
+                <>
+                  <button
+                    onClick={escapeData}
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors font-medium shadow-sm"
+                    title="Escape data (JSON strings, XML entities, YAML quotes)"
+                  >
+                    🔒 Escape
+                  </button>
+                  <button
+                    onClick={unescapeData}
+                    className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors font-medium shadow-sm"
+                    title="Unescape data (JSON strings, XML entities, YAML quotes)"
+                  >
+                    🔓 Unescape
+                  </button>
+                </>
+              )}
+              <button
+                onClick={loadSample}
+                className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors font-medium shadow-sm"
+                title="Load sample data"
+              >
+                📝 Sample
+              </button>
+              <button
+                onClick={clearAll}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium shadow-sm"
+                title="Clear all fields"
+              >
+                🧹 Clear
+              </button>
+            </div>
+            
+            {/* Compact Search Bar */}
+            {outputData && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600 dark:text-gray-400">🔍</span>
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search output..."
+                  className="w-40 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+                  title="Search in output data"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="px-1 py-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-sm"
+                    title="Clear search"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -794,56 +925,79 @@ address:
         {/* Statistics */}
         {formatStats && (
           <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Statistics</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <span className="text-gray-500 dark:text-gray-400">Size:</span>
-                <span className="ml-2 font-mono">{formatStats.size} chars</span>
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Data Statistics</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 text-sm">
+              <div className="bg-gray-50 dark:bg-gray-700 p-2 rounded">
+                <span className="text-gray-500 dark:text-gray-400 block">Size:</span>
+                <span className="font-mono font-medium">{formatStats.size} chars</span>
               </div>
-              <div>
-                <span className="text-gray-500 dark:text-gray-400">Format:</span>
-                <span className="ml-2 font-mono">{formatStats.format}</span>
+              <div className="bg-gray-50 dark:bg-gray-700 p-2 rounded">
+                <span className="text-gray-500 dark:text-gray-400 block">Format:</span>
+                <span className="font-mono font-medium">{formatStats.format}</span>
               </div>
-              {formatStats.items && (
-                <div>
-                  <span className="text-gray-500 dark:text-gray-400">Items:</span>
-                  <span className="ml-2 font-mono">{formatStats.items}</span>
-                </div>
-              )}
-              {formatStats.elements && (
-                <div>
-                  <span className="text-gray-500 dark:text-gray-400">Elements:</span>
-                  <span className="ml-2 font-mono">{formatStats.elements}</span>
+              {formatStats.lines && (
+                <div className="bg-gray-50 dark:bg-gray-700 p-2 rounded">
+                  <span className="text-gray-500 dark:text-gray-400 block">Lines:</span>
+                  <span className="font-mono font-medium">{formatStats.lines}</span>
                 </div>
               )}
               {formatStats.depth && (
-                <div>
-                  <span className="text-gray-500 dark:text-gray-400">Depth:</span>
-                  <span className="ml-2 font-mono">{formatStats.depth}</span>
+                <div className="bg-gray-50 dark:bg-gray-700 p-2 rounded">
+                  <span className="text-gray-500 dark:text-gray-400 block">Depth:</span>
+                  <span className="font-mono font-medium">{formatStats.depth}</span>
                 </div>
               )}
+              
+              {/* JSON/YAML specific stats */}
+              {formatStats.objects !== undefined && (
+                <>
+                  <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
+                    <span className="text-blue-600 dark:text-blue-400 block">Objects:</span>
+                    <span className="font-mono font-medium">{formatStats.objects}</span>
+                  </div>
+                  <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded">
+                    <span className="text-green-600 dark:text-green-400 block">Arrays:</span>
+                    <span className="font-mono font-medium">{formatStats.arrays}</span>
+                  </div>
+                  <div className="bg-purple-50 dark:bg-purple-900/20 p-2 rounded">
+                    <span className="text-purple-600 dark:text-purple-400 block">Strings:</span>
+                    <span className="font-mono font-medium">{formatStats.strings}</span>
+                  </div>
+                  <div className="bg-orange-50 dark:bg-orange-900/20 p-2 rounded">
+                    <span className="text-orange-600 dark:text-orange-400 block">Numbers:</span>
+                    <span className="font-mono font-medium">{formatStats.numbers}</span>
+                  </div>
+                  <div className="bg-teal-50 dark:bg-teal-900/20 p-2 rounded">
+                    <span className="text-teal-600 dark:text-teal-400 block">Booleans:</span>
+                    <span className="font-mono font-medium">{formatStats.booleans}</span>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-gray-700 p-2 rounded">
+                    <span className="text-gray-500 dark:text-gray-400 block">Keys:</span>
+                    <span className="font-mono font-medium">{formatStats.totalKeys}</span>
+                  </div>
+                </>
+              )}
+              
+              {/* XML specific stats */}
+              {formatStats.elements !== undefined && (
+                <>
+                  <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
+                    <span className="text-blue-600 dark:text-blue-400 block">Elements:</span>
+                    <span className="font-mono font-medium">{formatStats.elements}</span>
+                  </div>
+                  <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded">
+                    <span className="text-green-600 dark:text-green-400 block">Attributes:</span>
+                    <span className="font-mono font-medium">{formatStats.attributes}</span>
+                  </div>
+                  {formatStats.textNodes !== undefined && (
+                    <div className="bg-purple-50 dark:bg-purple-900/20 p-2 rounded">
+                      <span className="text-purple-600 dark:text-purple-400 block">Text Nodes:</span>
+                      <span className="font-mono font-medium">{formatStats.textNodes}</span>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
-          </div>
-        )}
-
-        {/* Search */}
-        {outputData && (
-          <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Search in Output
-            </label>
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Enter search term..."
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-            {searchTerm && (
-              <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-                Lines containing "{searchTerm}" will be highlighted with →
-              </p>
-            )}
           </div>
         )}
 
@@ -853,16 +1007,70 @@ address:
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div className="border-b border-gray-200 dark:border-gray-700 p-4">
               <h2 className="text-lg font-medium text-gray-900 dark:text-white">
-                Input (Auto-detected)
+                Input {inputData.trim() && (
+                  <span className="text-sm text-green-600 dark:text-green-400 font-normal">
+                    - Detected: {detectedInputFormat.toUpperCase()}
+                  </span>
+                )}
               </h2>
             </div>
             <div className="p-4">
               <textarea
                 value={inputData}
                 onChange={(e) => setInputData(e.target.value)}
-                placeholder="Enter your data here... Format will be auto-detected (JSON, XML, or YAML)"
-                className="w-full h-96 p-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                onPaste={(e) => {
+                  // Ensure paste works and handle large content
+                  e.preventDefault();
+                  const pastedData = e.clipboardData.getData('text');
+                  setInputData(pastedData);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDragOver(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDragOver(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDragOver(false);
+                  
+                  const files = Array.from(e.dataTransfer.files);
+                  if (files.length > 0) {
+                    const file = files[0];
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                      setInputData(event.target.result);
+                    };
+                    reader.readAsText(file);
+                  } else {
+                    // Handle text drop
+                    const text = e.dataTransfer.getData('text');
+                    if (text) {
+                      setInputData(text);
+                    }
+                  }
+                }}
+                placeholder="Enter your data here, paste from clipboard (Ctrl+V), or drag & drop a file... Format will be auto-detected (JSON, XML, or YAML)"
+                className={`w-full h-96 p-4 border-2 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-all duration-200 ${
+                  isDragOver 
+                    ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20' 
+                    : 'border-gray-300 dark:border-gray-600'
+                }`}
                 spellCheck="false"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                style={{
+                  WebkitUserSelect: 'text',
+                  MozUserSelect: 'text',
+                  msUserSelect: 'text',
+                  userSelect: 'text'
+                }}
               />
             </div>
           </div>
@@ -872,8 +1080,24 @@ address:
             <div className="border-b border-gray-200 dark:border-gray-700 p-4 flex justify-between items-center">
               <div className="flex items-center gap-4">
                 <h2 className="text-lg font-medium text-gray-900 dark:text-white">
-                  Output ({outputFormat.toUpperCase()})
+                  Output ({outputFormat.toUpperCase()}) {viewMode === 'tree' && (
+                    <span className="text-sm text-blue-600 dark:text-blue-400 font-normal">- Tree View</span>
+                  )}
                 </h2>
+                
+                {/* Return to formatted view button when in tree view */}
+                {viewMode === 'tree' && (
+                  <button
+                    onClick={() => {
+                      setOutputData(originalOutputData);
+                      setViewMode('formatted');
+                    }}
+                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                    title="Return to formatted view"
+                  >
+                    📄 Formatted
+                  </button>
+                )}
                 
                 {/* Format conversion buttons */}
                 <div className="flex gap-1">
@@ -927,18 +1151,21 @@ address:
                 </div>
               </div>
               
-              {outputData && (
-                <button
-                  onClick={copyToClipboard}
-                  className={`px-3 py-1 rounded-lg text-sm transition-colors ${
-                    copySuccess
-                      ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
-                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                  }`}
-                >
-                  {copySuccess ? '✅ Copied' : '📋 Copy'}
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+
+                {(outputData || originalOutputData) && (
+                  <button
+                    onClick={copyToClipboard}
+                    className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                      copySuccess
+                        ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                    }`}
+                  >
+                    {copySuccess ? '✅ Copied' : '📋 Copy'}
+                  </button>
+                )}
+              </div>
             </div>
             <div className="p-4">
               <textarea
@@ -956,7 +1183,7 @@ address:
         <div className="mt-8 text-center text-gray-500 dark:text-gray-400 text-sm">
           <p>Universal Format Converter - Auto-detects and converts between JSON, XML, and YAML</p>
           <p className="mt-1">
-            Keyboard shortcuts: Minify (Ctrl+M), Validate (Ctrl+V), Tree View (Ctrl+T), Escape (Ctrl+E), Clear (Ctrl+K), Upload (Ctrl+U), Download (Ctrl+S), Dark Mode (Ctrl+D)
+            Keyboard shortcuts: Paste (Ctrl+V), Minify (Ctrl+M), Validate (Ctrl+L), Tree View (Ctrl+T), Escape (Ctrl+E), Clear (Ctrl+K), Upload (Ctrl+U), Download (Ctrl+S), Dark Mode (Ctrl+D)
           </p>
         </div>
       </div>
